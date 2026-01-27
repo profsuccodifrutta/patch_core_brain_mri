@@ -1,0 +1,267 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyPqBxgQ6o10Mhk6tG3Ir6xD",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/profsuccodifrutta/patch_core_brain_mri/blob/main/requirements.txt\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "L0LP-mGiP96W",
+        "outputId": "dbc8f2b8-0561-4de4-aa46-9673ed66061d"
+      },
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Mounted at /content/drive\n"
+          ]
+        }
+      ],
+      "source": [
+        "from google.colab import drive\n",
+        "import zipfile\n",
+        "import os\n",
+        "\n",
+        "drive.mount('/content/drive')\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "zip_path = '/content/drive/MyDrive/brainmri.zip'\n",
+        "extract_path = '/content/brain_dataset' # Cartella locale di Colab\n",
+        "\n",
+        "if not os.path.exists(extract_path):\n",
+        "    with zipfile.ZipFile(zip_path, 'r') as zip_ref:\n",
+        "        zip_ref.extractall(extract_path)\n",
+        "    print(\"✅ Estrazione completata!\")"
+      ],
+      "metadata": {
+        "id": "jwJOEx_LQ9wK",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "8b0dab94-db86-405d-f3e7-43540276befa"
+      },
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "✅ Estrazione completata!\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# !pip install anomalib\n",
+        "# !pip install faiss-cpu\n",
+        "# !pip freeze > requirements.txt\n",
+        "!pwd"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "7zflFq1YUSzA",
+        "outputId": "5f9e67be-e3a2-48ca-e1b8-833c656aeec5"
+      },
+      "execution_count": 7,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "/content\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import torch\n",
+        "from pathlib import Path\n",
+        "from anomalib.data import Folder\n",
+        "from anomalib.models import Patchcore\n",
+        "from anomalib.engine import Engine\n",
+        "\n",
+        "\n",
+        "DATA_PATH = Path('/content/brain_dataset')\n",
+        "\n",
+        "datamodule = Folder(\n",
+        "    name=\"brain_mri\",\n",
+        "    root=DATA_PATH,\n",
+        "    normal_dir=\"Training/notumor\",      # Sani per il training\n",
+        "    normal_test_dir=\"Testing/notumor\",  # Sani per il test\n",
+        "    abnormal_dir=\"Testing\",             # Tutte le altre cartelle in Testing sono anomalie\n",
+        "    train_batch_size=8,\n",
+        "    eval_batch_size=8,\n",
+        "    num_workers=2\n",
+        ")\n",
+        "datamodule.setup()\n",
+        "\n",
+        "print(\"✅ Configurazione completata. Pronto per l'estrazione delle feature.\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "YbqNFqRyRqRb",
+        "outputId": "2fe3c18e-aebc-42b9-b302-d4a5805bbe21"
+      },
+      "execution_count": 4,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "✅ Configurazione completata. Pronto per l'estrazione delle feature.\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# PatchCore\n",
+        "model = Patchcore(\n",
+        "    backbone=\"wide_resnet50_2\",\n",
+        "    layers=[\"layer2\", \"layer3\"],\n",
+        "    coreset_sampling_ratio=0.01\n",
+        ")\n",
+        "\n",
+        "# motore colab\n",
+        "engine = Engine(\n",
+        "    max_epochs=1,\n",
+        "    devices=1,\n",
+        "    accelerator=\"auto\"\n",
+        ")\n",
+        "\n",
+        "# Crea la memoria dei sani (Training)\n",
+        "print(\"Creazione Memory Bank dei sani...\")\n",
+        "engine.fit(model=model, datamodule=datamodule)\n",
+        "\n",
+        "#  Confronta i malati con la memoria (Inference)\n",
+        "print(\" Valutazione sulle anomalie...\")\n",
+        "results = engine.test(model=model, datamodule=datamodule)\n",
+        "\n",
+        "print(\"\\n--- RISULTATI FINALI ---\")\n",
+        "print(results)"
+      ],
+      "metadata": {
+        "id": "JtD9h5ObTRWa"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# salva il modello\n",
+        "path_salvataggio = \"/content/drive/MyDrive/patchcore_model.ckpt\"\n",
+        "engine.save_checkpoint(path_salvataggio)\n",
+        "print(f\"✅ Modello salvato correttamente in: {path_salvataggio}\")"
+      ],
+      "metadata": {
+        "id": "xUL5pqkIXr1j"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# inferenza senza dover ricreare la memory bank\n",
+        "# Inizializzi il modello\n",
+        "model = Patchcore(backbone=\"wide_resnet50_2\", layers=[\"layer2\", \"layer3\"])\n",
+        "\n",
+        "# Carica pesi e la Memory Bank dal file\n",
+        "model = Patchcore.load_from_checkpoint(checkpoint_path=\"/content/drive/MyDrive/patchcore_model.ckpt\")\n",
+        "\n",
+        "# Inizializzi l'Engine solo per il test/predict\n",
+        "engine = Engine(devices=1)\n",
+        "\n",
+        "# 4. Fai inferenza su una nuova cartella di immagini\n",
+        "# (Oppure su una singola immagine usando engine.predict)\n",
+        "predictions = engine.predict(model=model, datamodule=datamodule)"
+      ],
+      "metadata": {
+        "id": "nvXKENxpXzbf"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Visualizzazione Risultati\n",
+        "from anomalib.utils.post_processing import visualizer\n",
+        "import matplotlib.pyplot as plt\n",
+        "from PIL import Image\n",
+        "\n",
+        "\n",
+        "predictions = engine.predict(model=model, datamodule=datamodule)\n",
+        "\n",
+        "# Visualizza le prime 3 immagini del test set\n",
+        "for i, prediction in enumerate(predictions):\n",
+        "    if i > 2: break\n",
+        "\n",
+        "    plt.figure(figsize=(12, 4))\n",
+        "\n",
+        "    # Immagine Originale\n",
+        "    plt.subplot(1, 3, 1)\n",
+        "    plt.imshow(prediction.image)\n",
+        "    plt.title(\"Originale\")\n",
+        "\n",
+        "    # Mappa di Anomalia (Heatmap)\n",
+        "    plt.subplot(1, 3, 2)\n",
+        "    plt.imshow(prediction.anomaly_map, cmap='jet')\n",
+        "    plt.title(\"Mappa Anomalia\")\n",
+        "\n",
+        "    # Sovrapposizione (Overlay)\n",
+        "    plt.subplot(1, 3, 3)\n",
+        "    plt.imshow(prediction.segmentations)\n",
+        "    plt.title(\"Risultato Finale\")\n",
+        "\n",
+        "    plt.show()"
+      ],
+      "metadata": {
+        "id": "5t4ndQkJUFsD"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
